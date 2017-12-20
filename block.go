@@ -2,8 +2,7 @@ package hoji
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"strconv"
+	"encoding/gob"
 	"time"
 )
 
@@ -13,6 +12,7 @@ type Block struct {
 	Data          []byte
 	PrevBlockHash []byte
 	Hash          []byte
+	Nonce         int
 }
 
 //NewBlock creates and returns a new block for the blockchain
@@ -36,19 +36,27 @@ func NewGenesisBlock() *Block {
 //SetHash creates the hash(I like to think of it as the blocks ID) for a block.
 // NOTE: should I just return a new block? It is more computationally expensive but makes for better code debugging imo.
 func (b *Block) SetHash() {
-	strTimestamp := strconv.FormatInt(b.Timestamp, 10)
-	timestamp := []byte(strTimestamp)
+	pow := NewPOW(b)
+	hash, nonce := pow.Exec()
 
-	//This is all the Block struct properties combined into one byte array
-	headers := bytes.Join(
-		[][]byte{
-			b.Data,
-			b.PrevBlockHash,
-			timestamp,
-		},
-		[]byte{},
-	)
+	b.Hash = hash
+	b.Nonce = nonce
+}
 
-	hash := sha256.Sum256(headers)
-	b.Hash = hash[:]
+//Bytes transforms a Block struct to a byte array
+func (b *Block) Bytes() ([]byte, error) {
+	result := new(bytes.Buffer)
+	if err := gob.NewEncoder(result).Encode(b); err != nil {
+		return nil, err
+	}
+	return result.Bytes(), nil
+}
+
+//BytesToBlock tranforms a byte array into a Block struct
+func BytesToBlock(v []byte) (*Block, error) {
+	b := new(Block)
+	if err := gob.NewDecoder(bytes.NewReader(v)).Decode(b); err != nil {
+		return nil, err
+	}
+	return b, nil
 }
