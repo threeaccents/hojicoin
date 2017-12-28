@@ -2,8 +2,13 @@ package hoji
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/gob"
+	"encoding/hex"
+	"math/big"
 )
 
 // Transaction represents a Hoji transaction. Maybe split transaction into 2 separe structs transaction and coinbase transaction
@@ -17,15 +22,12 @@ type Transaction struct {
 const subsidy = 10
 
 // NewCoinbaseTx a coinbase transaction is a transaction that does not require inputs to generate outputs. The gensis block is a coinbase transaction and when miners mine new blocks their reward is a coinbase transaction.
-func NewCoinbaseTx(to, data string) (*Transaction, error) {
+func NewCoinbaseTx(to, data []byte) (*Transaction, error) {
 	txIn := &TxInput{
-		ScriptSig: data,
-		outIndex:  -1,
+		PubKey:   data,
+		outIndex: -1,
 	}
-	txOut := &TxOutput{
-		Value:        subsidy,
-		ScriptPubKey: to,
-	}
+	txOut := NewTxOutput(subsidy, to)
 
 	tx := &Transaction{
 		Inputs:  []*TxInput{txIn},
@@ -40,24 +42,41 @@ func NewCoinbaseTx(to, data string) (*Transaction, error) {
 }
 
 //NewTx is
-func (bc *Blockchain) NewTx(from, to string, amount int) (*Transaction, error) {
+func (bc *Blockchain) NewTx(from, to []byte, amount int) (*Transaction, error) {
 	var inputs []*TxInput
 	var outputs []*TxOutput
 
-	txs := bc.FindUnspentTxs(from)
+	wallets, err := NewWallets()
+	if err != nil {
+		return nil, err
+	}
+
+	wallet := wallets.GetWallet(string(from))
+	pubKeyHash, err := hashPubKey(wallet.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	txs, err := bc.FindUnspentTxs(from)
+	if err != nil {
+		return nil, err
+	}
 
 	accumulated := 0
 Work:
 	for _, tx := range txs {
 		for i, output := range tx.Outputs {
-			if output.CanBeUnlockedWith(from) && accumulated < amount {
+			if output.IsLockedWithKey(pubKeyHash) && accumulated < amount {
 				accumulated += output.Value
-				input := &TxInput{
-					TxID:      tx.ID,
-					outIndex:  i,
-					ScriptSig: from,
+
+				in := &TxInput{
+					TxID:     tx.ID,
+					outIndex: i,
+					PubKey:   wallet.PublicKey,
 				}
-				inputs = append(inputs, input)
+
+				inputs = append(inputs, in)
+
 				if accumulated > amount {
 					break Work
 				}
@@ -69,19 +88,10 @@ Work:
 	if accumulated < amount {
 		return nil, ErrInsuficientFunds
 	}
-
-	txOutput := &TxOutput{
-		Value:        amount,
-		ScriptPubKey: to,
-	}
-	outputs = append(outputs, txOutput)
+	outputs = append(outputs, NewTxOutput(amount, to))
 	if accumulated > amount {
 		change := accumulated - amount
-		changeOutput := &TxOutput{
-			Value:        change,
-			ScriptPubKey: from,
-		}
-		outputs = append(outputs, changeOutput)
+		outputs = append(outputs, NewTxOutput(change, from))
 	}
 	tx := &Transaction{
 		Outputs: outputs,
@@ -94,7 +104,109 @@ Work:
 	}
 	tx.ID = txID
 
+	if err := bc.SignTx(tx, wallet.PrivateKey); err != nil {
+		return nil, err
+	}
 	return tx, nil
+}
+
+//Sign is
+func (t *Transaction) Sign(privateKey *ecdsa.PrivateKey, prevTxs map[string]*Transaction) error {
+	if t.IsCoinbase() {
+		return nil
+	}
+
+	trimmedTx := t.Trim()
+
+	for inputIndex, input := range trimmedTx.Inputs {
+		prevTx := prevTxs[hex.EncodeToString(input.TxID)]
+		trimmedTx.Inputs[inputIndex].PubKey = prevTx.Outputs[input.outIndex].PubKeyHash
+		id, err := trimmedTx.hashTransaction()
+		if err != nil {
+			return err
+		}
+		trimmedTx.ID = id
+		trimmedTx.Inputs[inputIndex].PubKey = nil
+
+		r, s, err := ecdsa.Sign(rand.Reader, privateKey, trimmedTx.ID)
+		if err != nil {
+			return err
+		}
+
+		signature := append(r.Bytes(), s.Bytes()...)
+		t.Inputs[inputIndex].Signature = signature
+	}
+
+	return nil
+}
+
+//Verify is
+func (t *Transaction) Verify(prevTxs map[string]*Transaction) (bool, error) {
+	trimmedTx := t.Trim()
+	curve := elliptic.P256()
+
+	for inputIndex, input := range t.Inputs {
+		prevTx := prevTxs[hex.EncodeToString(input.TxID)]
+		trimmedTx.Inputs[inputIndex].Signature = nil
+		trimmedTx.Inputs[inputIndex].PubKey = prevTx.Outputs[input.outIndex].PubKeyHash
+		id, err := trimmedTx.hashTransaction()
+		if err != nil {
+			return false, err
+		}
+		trimmedTx.ID = id
+		trimmedTx.Inputs[inputIndex].PubKey = nil
+
+		r := big.Int{}
+		s := big.Int{}
+		signatureLen := len(input.Signature)
+		r.SetBytes(input.Signature[:(signatureLen / 2)])
+		s.SetBytes(input.Signature[(signatureLen / 2):])
+
+		x := big.Int{}
+		y := big.Int{}
+		keyLen := len(input.PubKey)
+		x.SetBytes(input.PubKey[:(keyLen / 2)])
+		y.SetBytes(input.PubKey[(keyLen / 2):])
+
+		rawPubKey := ecdsa.PublicKey{
+			Curve: curve,
+			X:     &x,
+			Y:     &y,
+		}
+		if ecdsa.Verify(&rawPubKey, trimmedTx.ID, &r, &s) == false {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+//Trim is
+func (t *Transaction) Trim() *Transaction {
+	var inputs []*TxInput
+	var outputs []*TxOutput
+
+	for _, input := range t.Inputs {
+		in := &TxInput{
+			TxID:     input.TxID,
+			outIndex: input.outIndex,
+		}
+		inputs = append(inputs, in)
+	}
+
+	for _, ouput := range outputs {
+		out := &TxOutput{
+			Value:      ouput.Value,
+			PubKeyHash: ouput.PubKeyHash,
+		}
+		outputs = append(outputs, out)
+	}
+
+	return &Transaction{
+		ID:      t.ID,
+		Inputs:  inputs,
+		Outputs: outputs,
+	}
 }
 
 //hashTransaction will hash all the transactions contents using sha256. hashTransaction will transform the transaction struct pointer into a byte array then sha256 hash it returing the hash.

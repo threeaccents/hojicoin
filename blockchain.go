@@ -1,7 +1,10 @@
 package hoji
 
 import (
+	"bytes"
+	"crypto/ecdsa"
 	"encoding/hex"
+	"errors"
 	"os"
 
 	"github.com/boltdb/bolt"
@@ -22,7 +25,7 @@ type Blockchain struct {
 // NewBlockchain creates and returns an instance of the Blockchain struct
 func NewBlockchain() (*Blockchain, error) {
 	if !dbExists() {
-		if err := CreateBlockchain("genesis address"); err != nil {
+		if err := CreateBlockchain([]byte("genesis address")); err != nil {
 			return nil, err
 		}
 	}
@@ -44,13 +47,13 @@ func NewBlockchain() (*Blockchain, error) {
 }
 
 //CreateBlockchain is
-func CreateBlockchain(address string) error {
+func CreateBlockchain(address []byte) error {
 	db, err := bolt.Open(dbFile, 0600, nil)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	transaction, err := NewCoinbaseTx(address, "yolo dolo")
+	transaction, err := NewCoinbaseTx(address, []byte("yolo dolo"))
 	if err != nil {
 		return err
 	}
@@ -76,7 +79,7 @@ func CreateBlockchain(address string) error {
 }
 
 //FindUnspentTxs is
-func (bc *Blockchain) FindUnspentTxs(address string) []*Transaction {
+func (bc *Blockchain) FindUnspentTxs(address []byte) ([]*Transaction, error) {
 	var unspentTxs []*Transaction
 	spentTxOutputs := make(map[string][]int)
 	bci := bc.Iterator()
@@ -96,14 +99,18 @@ func (bc *Blockchain) FindUnspentTxs(address string) []*Transaction {
 					}
 				}
 
-				if outTx.CanBeUnlockedWith(address) {
+				if outTx.IsLockedWithKey(address) {
 					unspentTxs = append(unspentTxs, tx)
 				}
 			}
 
 			if !tx.IsCoinbase() {
 				for _, in := range tx.Inputs {
-					if in.CanUnlockOutputWith(address) {
+					ok, err := in.UsesKey(address)
+					if err != nil {
+						return nil, err
+					}
+					if ok {
 						inTxID := hex.EncodeToString(in.TxID)
 						spentTxOutputs[inTxID] = append(spentTxOutputs[inTxID], in.outIndex)
 					}
@@ -116,28 +123,92 @@ func (bc *Blockchain) FindUnspentTxs(address string) []*Transaction {
 		}
 	}
 
-	return unspentTxs
+	return unspentTxs, nil
 }
 
 //FindUTXO finds all unspent transaction outputs
-func (bc *Blockchain) FindUTXO(address string) []*TxOutput {
+func (bc *Blockchain) FindUTXO(address []byte) ([]*TxOutput, error) {
 	var outputs []*TxOutput
 
-	txs := bc.FindUnspentTxs(address)
+	txs, err := bc.FindUnspentTxs(address)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, tx := range txs {
 		for _, output := range tx.Outputs {
-			if output.CanBeUnlockedWith(address) {
+			if output.IsLockedWithKey(address) {
 				outputs = append(outputs, output)
 			}
 		}
 	}
 
-	return outputs
+	return outputs, nil
+}
+
+//FindTx is
+func (bc *Blockchain) FindTx(id []byte) (*Transaction, error) {
+	bci := bc.Iterator()
+
+	for {
+		block := bci.Next()
+
+		for _, tx := range block.Transactions {
+			if bytes.Compare(tx.ID, id) == 0 {
+				return tx, nil
+			}
+		}
+		if len(block.PrevBlockHash) == 0 {
+			break
+		}
+	}
+
+	return nil, ErrNotFound
+}
+
+//SignTx is
+func (bc *Blockchain) SignTx(tx *Transaction, privKey *ecdsa.PrivateKey) error {
+	prevTxs := make(map[string]*Transaction)
+
+	for _, input := range tx.Inputs {
+		prevTx, err := bc.FindTx(input.TxID)
+		if err != nil {
+			return err
+		}
+		prevTxs[hex.EncodeToString(prevTx.ID)] = prevTx
+	}
+
+	return tx.Sign(privKey, prevTxs)
+}
+
+//VerifyTransaction is
+func (bc *Blockchain) VerifyTransaction(tx *Transaction) (bool, error) {
+	prevTxs := make(map[string]*Transaction)
+
+	for _, input := range tx.Inputs {
+		prevTx, err := bc.FindTx(input.TxID)
+		if err != nil {
+			return false, err
+		}
+		prevTxs[hex.EncodeToString(prevTx.ID)] = prevTx
+	}
+
+	return tx.Verify(prevTxs)
 }
 
 //MineBlock adds a new block to the blockchain
-func (bc *Blockchain) MineBlock(tx []*Transaction) error {
+func (bc *Blockchain) MineBlock(txs []*Transaction) error {
+	for _, tx := range txs {
+		ok, err := bc.VerifyTransaction(tx)
+		if err != nil {
+			return err
+		}
+
+		if !ok {
+			return errors.New("invalid transaction")
+		}
+	}
+
 	var lastHash []byte
 	if err := bc.DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
@@ -147,7 +218,7 @@ func (bc *Blockchain) MineBlock(tx []*Transaction) error {
 		return err
 	}
 
-	newBlock := NewBlock(tx, lastHash)
+	newBlock := NewBlock(txs, lastHash)
 	return bc.DB.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 
