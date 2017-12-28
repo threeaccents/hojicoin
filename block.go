@@ -34,7 +34,7 @@ func NewGenesisBlock(coinbaseTx *Transaction) *Block {
 	return NewBlock([]*Transaction{coinbaseTx}, []byte{})
 }
 
-//SetHash creates the hash(I like to think of it as the blocks ID) for a block.
+//SetHash creates the hash(I like to think of it as the block's ID) for a block.
 // NOTE: should I just return a new block? It is more computationally expensive but makes for better code debugging imo.
 func (b *Block) SetHash() {
 	pow := NewPOW(b)
