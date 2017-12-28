@@ -2,6 +2,7 @@ package hoji
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/gob"
 	"time"
 )
@@ -9,17 +10,17 @@ import (
 // Block is the data structure that holds the blockchain's data.In bitcoin the block holds an array on transactions. Their block size limit is 1mb.
 type Block struct {
 	Timestamp     int64
-	Data          []byte
+	Transactions  []*Transaction
 	PrevBlockHash []byte
 	Hash          []byte
 	Nonce         int
 }
 
 //NewBlock creates and returns a new block for the blockchain
-func NewBlock(data, PrevBlockHash []byte) *Block {
+func NewBlock(tx []*Transaction, PrevBlockHash []byte) *Block {
 	b := &Block{
 		Timestamp:     time.Now().Unix(),
-		Data:          data,
+		Transactions:  tx,
 		PrevBlockHash: PrevBlockHash,
 	}
 	// We need the other properties of the Block to be set to generate a hash. That's why we have a special method for it that we call after setting the value for the other Block struct properties
@@ -29,8 +30,8 @@ func NewBlock(data, PrevBlockHash []byte) *Block {
 }
 
 //NewGenesisBlock creates and returns a new genesis block for the blockchain. The genesis block is the first block created in the blockchain. Since a block needs a previous block to be created we much create the first block "artificially"
-func NewGenesisBlock() *Block {
-	return NewBlock([]byte("hoji coin genesis block"), []byte{})
+func NewGenesisBlock(coinbaseTx *Transaction) *Block {
+	return NewBlock([]*Transaction{coinbaseTx}, []byte{})
 }
 
 //SetHash creates the hash(I like to think of it as the blocks ID) for a block.
@@ -41,6 +42,17 @@ func (b *Block) SetHash() {
 
 	b.Hash = hash
 	b.Nonce = nonce
+}
+
+//HashTransactions will hash the blocks transaction struct slice and return it. It does this by concatinating all the transaction ids and then sha256 hasing them.
+func (b *Block) HashTransactions() []byte {
+	var txIds [][]byte
+	for _, tx := range b.Transactions {
+		txIds = append(txIds, tx.ID)
+	}
+
+	hash := sha256.Sum256(bytes.Join(txIds, []byte{}))
+	return hash[:]
 }
 
 //Bytes transforms a Block struct to a byte array

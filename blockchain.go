@@ -1,10 +1,16 @@
 package hoji
 
-import "github.com/boltdb/bolt"
+import (
+	"encoding/hex"
+	"os"
+
+	"github.com/boltdb/bolt"
+)
 
 const (
 	blocksBucket = "blocks"
 	lastHashKey  = "l"
+	dbFile       = "hoji.db"
 )
 
 // Blockchain is
@@ -14,21 +20,47 @@ type Blockchain struct {
 }
 
 // NewBlockchain creates and returns an instance of the Blockchain struct
-func NewBlockchain(db *bolt.DB) (*Blockchain, error) {
+func NewBlockchain() (*Blockchain, error) {
+	if !dbExists() {
+		if err := CreateBlockchain("genesis address"); err != nil {
+			return nil, err
+		}
+	}
+	db, err := bolt.Open(dbFile, 0600, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	var tip []byte
 	if err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
-		// If we already have a blocks bucket set the tip and return
-		if b != nil {
-			tip = b.Get([]byte(lastHashKey))
-			return nil
-		}
-		gensisBlock := NewGenesisBlock()
+		tip = b.Get([]byte(lastHashKey))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return &Blockchain{db, tip}, nil
+}
+
+//CreateBlockchain is
+func CreateBlockchain(address string) error {
+	db, err := bolt.Open(dbFile, 0600, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	transaction, err := NewCoinbaseTx(address, "yolo dolo")
+	if err != nil {
+		return err
+	}
+	gensisBlock := NewGenesisBlock(transaction)
+
+	return db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte(blocksBucket))
 		if err != nil {
 			return err
 		}
-
 		blockBytes, err := gensisBlock.Bytes()
 		if err != nil {
 			return err
@@ -38,28 +70,84 @@ func NewBlockchain(db *bolt.DB) (*Blockchain, error) {
 			return err
 		}
 
-		tip = gensisBlock.Hash
 		return b.Put([]byte(lastHashKey), gensisBlock.Hash)
-	}); err != nil {
-		return nil, err
+	})
+
+}
+
+//FindUnspentTxs is
+func (bc *Blockchain) FindUnspentTxs(address string) []*Transaction {
+	var unspentTxs []*Transaction
+	spentTxOutputs := make(map[string][]int)
+	bci := bc.Iterator()
+	for {
+		block := bci.Next()
+
+		for _, tx := range block.Transactions {
+			txID := hex.EncodeToString(tx.ID)
+		Outputs:
+			for outTxIndex, outTx := range tx.Outputs {
+				// check if output was spent
+				if spentTxOutputs[txID] != nil {
+					for _, spentOutput := range spentTxOutputs[txID] {
+						if spentOutput == outTxIndex {
+							continue Outputs
+						}
+					}
+				}
+
+				if outTx.CanBeUnlockedWith(address) {
+					unspentTxs = append(unspentTxs, tx)
+				}
+			}
+
+			if !tx.IsCoinbase() {
+				for _, in := range tx.Inputs {
+					if in.CanUnlockOutputWith(address) {
+						inTxID := hex.EncodeToString(in.TxID)
+						spentTxOutputs[inTxID] = append(spentTxOutputs[inTxID], in.outIndex)
+					}
+				}
+			}
+
+		}
+		if len(block.PrevBlockHash) == 0 {
+			break
+		}
 	}
 
-	return &Blockchain{db, tip}, nil
+	return unspentTxs
+}
+
+//FindUTXO finds all unspent transaction outputs
+func (bc *Blockchain) FindUTXO(address string) []*TxOutput {
+	var outputs []*TxOutput
+
+	txs := bc.FindUnspentTxs(address)
+
+	for _, tx := range txs {
+		for _, output := range tx.Outputs {
+			if output.CanBeUnlockedWith(address) {
+				outputs = append(outputs, output)
+			}
+		}
+	}
+
+	return outputs
 }
 
 //MineBlock adds a new block to the blockchain
-func (bc *Blockchain) MineBlock(data []byte) error {
-	// Note: is this event needed? the blockchain struct keeps in memory the last hash. Feching from the DB seems unecessary
-	// var lastHash []byte
-	// if err := bc.DB.View(func(tx *bolt.Tx) error {
-	// 	b := tx.Bucket([]byte(blocksBucket))
-	// 	lastHash = b.Get([]byte(lastHashKey))
-	// 	return nil
-	// }); err != nil {
-	// 	return err
-	// }
+func (bc *Blockchain) MineBlock(tx []*Transaction) error {
+	var lastHash []byte
+	if err := bc.DB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		lastHash = b.Get([]byte(lastHashKey))
+		return nil
+	}); err != nil {
+		return err
+	}
 
-	newBlock := NewBlock(data, bc.tip)
+	newBlock := NewBlock(tx, lastHash)
 	return bc.DB.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 
@@ -85,4 +173,12 @@ func (bc *Blockchain) Iterator() *BlockchainIterator {
 		currentHash: bc.tip,
 		db:          bc.DB,
 	}
+}
+
+func dbExists() bool {
+	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+		return false
+	}
+
+	return true
 }

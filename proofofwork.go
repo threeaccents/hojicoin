@@ -40,7 +40,7 @@ func (p *ProofOfWork) Exec() ([]byte, int) {
 	var hashInt big.Int
 	nonce := 0
 
-	fmt.Printf("Mining the block containing \"%s\"\n", p.Block.Data)
+	fmt.Println("Mining new block")
 	for {
 		if nonce > maxNonce {
 			log.Panic("proof of work nonce overflow")
@@ -76,7 +76,7 @@ func (p *ProofOfWork) prepData(nonce int) []byte {
 		[][]byte{
 			p.Block.PrevBlockHash,
 			IntToByte(p.Block.Timestamp),
-			p.Block.Data,
+			p.Block.HashTransactions(),
 			IntToByte(int64(targetBits)),
 			IntToByte(int64(nonce)),
 		},
