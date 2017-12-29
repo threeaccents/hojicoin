@@ -14,9 +14,10 @@ type TxOutput struct {
 
 // NewTxOutput create a new TXOutput
 func NewTxOutput(value int, address []byte) *TxOutput {
-	txo := &TxOutput{value, nil}
+	txo := &TxOutput{
+		Value: value,
+	}
 	txo.Lock(address)
-
 	return txo
 }
 

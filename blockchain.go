@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/boltdb/bolt"
@@ -80,6 +81,7 @@ func CreateBlockchain(address []byte) error {
 
 //FindUnspentTxs is
 func (bc *Blockchain) FindUnspentTxs(address []byte) ([]*Transaction, error) {
+	pubKeyHash := ExtractPubKey(address)
 	var unspentTxs []*Transaction
 	spentTxOutputs := make(map[string][]int)
 	bci := bc.Iterator()
@@ -92,6 +94,7 @@ func (bc *Blockchain) FindUnspentTxs(address []byte) ([]*Transaction, error) {
 			for outTxIndex, outTx := range tx.Outputs {
 				// check if output was spent
 				if spentTxOutputs[txID] != nil {
+					fmt.Println("output was spent")
 					for _, spentOutput := range spentTxOutputs[txID] {
 						if spentOutput == outTxIndex {
 							continue Outputs
@@ -99,14 +102,14 @@ func (bc *Blockchain) FindUnspentTxs(address []byte) ([]*Transaction, error) {
 					}
 				}
 
-				if outTx.IsLockedWithKey(address) {
+				if outTx.IsLockedWithKey(pubKeyHash) {
 					unspentTxs = append(unspentTxs, tx)
 				}
 			}
 
 			if !tx.IsCoinbase() {
 				for _, in := range tx.Inputs {
-					ok, err := in.UsesKey(address)
+					ok, err := in.UsesKey(pubKeyHash)
 					if err != nil {
 						return nil, err
 					}
@@ -135,9 +138,11 @@ func (bc *Blockchain) FindUTXO(address []byte) ([]*TxOutput, error) {
 		return nil, err
 	}
 
+	pubKey := ExtractPubKey(address)
+
 	for _, tx := range txs {
 		for _, output := range tx.Outputs {
-			if output.IsLockedWithKey(address) {
+			if output.IsLockedWithKey(pubKey) {
 				outputs = append(outputs, output)
 			}
 		}

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"log"
+
+	"gitlab.com/rodzzlessa24/hoji/base58"
 )
 
 // IntToByte converts an int64 to a byte array
@@ -15,4 +17,10 @@ func IntToByte(num int64) []byte {
 	}
 
 	return buff.Bytes()
+}
+
+//ExtractPubKey is
+func ExtractPubKey(address []byte) []byte {
+	decodeAddr := base58.Decode(address)
+	return decodeAddr[1 : len(decodeAddr)-4]
 }
