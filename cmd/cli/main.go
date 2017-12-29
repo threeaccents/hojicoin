@@ -19,6 +19,9 @@ func main() {
 type CLI struct{}
 
 func (cli *CLI) createBlockchain(address string) {
+	if !hoji.ValidateAddress(address) {
+		log.Panic("ERROR: Address is not valid")
+	}
 	if err := hoji.CreateBlockchain([]byte(address)); err != nil {
 		log.Panic(err)
 	}
@@ -26,6 +29,9 @@ func (cli *CLI) createBlockchain(address string) {
 }
 
 func (cli *CLI) getBalance(address string) {
+	if !hoji.ValidateAddress(address) {
+		log.Panic("ERROR: Address is not valid")
+	}
 	bc, _ := hoji.NewBlockchain()
 	defer bc.DB.Close()
 
@@ -35,6 +41,8 @@ func (cli *CLI) getBalance(address string) {
 		log.Panic(err)
 	}
 
+	fmt.Println("len utxo", len(UTXOs))
+
 	for _, out := range UTXOs {
 		balance += out.Value
 	}
@@ -43,16 +51,29 @@ func (cli *CLI) getBalance(address string) {
 }
 
 func (cli *CLI) send(from, to string, amount int) {
+	if !hoji.ValidateAddress(from) {
+		log.Panic("ERROR: from address is not valid")
+	}
+	if !hoji.ValidateAddress(to) {
+		log.Panic("ERROR: to address is not valid")
+	}
 	bc, _ := hoji.NewBlockchain()
 	defer bc.DB.Close()
 
 	tx, err := bc.NewTx([]byte(from), []byte(to), amount)
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 
-	if err := bc.MineBlock([]*hoji.Transaction{tx}); err != nil {
-		log.Fatal(err)
+	coinbaseTx, err := hoji.NewCoinbaseTx([]byte(from), []byte("reward tx"))
+	if err != nil {
+		log.Panic(err)
+	}
+
+	txs := []*hoji.Transaction{tx, coinbaseTx}
+
+	if err := bc.MineBlock(txs); err != nil {
+		log.Panic(err)
 	}
 
 	fmt.Println("money sent!")

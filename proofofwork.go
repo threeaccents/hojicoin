@@ -27,8 +27,6 @@ func NewPOW(b *Block) *ProofOfWork {
 	target := big.NewInt(1)
 	target.Lsh(target, uint(256-targetBits))
 
-	fmt.Println("pow target", target)
-
 	return &ProofOfWork{
 		Block:  b,
 		target: target,

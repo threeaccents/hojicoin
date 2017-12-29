@@ -19,8 +19,8 @@ func IntToByte(num int64) []byte {
 	return buff.Bytes()
 }
 
-//ExtractPubKey is
-func ExtractPubKey(address []byte) []byte {
+//ExtractPubKeyHash is
+func ExtractPubKeyHash(address []byte) []byte {
 	decodeAddr := base58.Decode(address)
 	return decodeAddr[1 : len(decodeAddr)-4]
 }

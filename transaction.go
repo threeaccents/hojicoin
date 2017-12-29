@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
+	"fmt"
 	"math/big"
 )
 
@@ -23,9 +24,20 @@ const subsidy = 10
 
 // NewCoinbaseTx a coinbase transaction is a transaction that does not require inputs to generate outputs. The gensis block is a coinbase transaction and when miners mine new blocks their reward is a coinbase transaction.
 func NewCoinbaseTx(to, data []byte) (*Transaction, error) {
+	if data == nil {
+		randData := make([]byte, 20)
+		_, err := rand.Read(randData)
+		if err != nil {
+			return nil, err
+		}
+
+		data = randData
+	}
 	txIn := &TxInput{
-		PubKey:   data,
-		outIndex: -1,
+		TxID:      []byte{},
+		PubKey:    data,
+		Signature: nil,
+		outIndex:  -1,
 	}
 	txOut := NewTxOutput(subsidy, to)
 
@@ -81,7 +93,6 @@ Work:
 					break Work
 				}
 			}
-
 		}
 	}
 
@@ -93,6 +104,8 @@ Work:
 		change := accumulated - amount
 		outputs = append(outputs, NewTxOutput(change, from))
 	}
+
+	fmt.Printf("we have %d outputs \n", len(outputs))
 	tx := &Transaction{
 		Outputs: outputs,
 		Inputs:  inputs,
@@ -142,6 +155,10 @@ func (t *Transaction) Sign(privateKey *ecdsa.PrivateKey, prevTxs map[string]*Tra
 
 //Verify is
 func (t *Transaction) Verify(prevTxs map[string]*Transaction) (bool, error) {
+	if t.IsCoinbase() {
+		return true, nil
+	}
+
 	trimmedTx := t.Trim()
 	curve := elliptic.P256()
 

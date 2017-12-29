@@ -32,12 +32,15 @@ func (ws *Wallets) AddWallet() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	address, err := wallet.GetAddress()
 	if err != nil {
 		return nil, err
 	}
 
-	ws.Wallets[fmt.Sprintf("%s", address)] = wallet
+	strAddr := fmt.Sprintf("%s", address)
+
+	ws.Wallets[string(strAddr)] = wallet
 
 	return address, nil
 }
@@ -85,14 +88,11 @@ func (ws *Wallets) LoadFromFile() error {
 }
 
 // SaveToFile saves wallets to a file
-func (ws Wallets) SaveToFile() error {
+func (ws *Wallets) SaveToFile() error {
 	var content bytes.Buffer
 
 	gob.Register(elliptic.P256())
-
-	encoder := gob.NewEncoder(&content)
-	err := encoder.Encode(ws)
-	if err != nil {
+	if err := gob.NewEncoder(&content).Encode(ws); err != nil {
 		return err
 	}
 
