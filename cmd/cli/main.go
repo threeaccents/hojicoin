@@ -35,13 +35,12 @@ func (cli *CLI) getBalance(address string) {
 	bc, _ := hoji.NewBlockchain()
 	defer bc.DB.Close()
 
+	utxoSet := hoji.UTXOSet{Bc: bc}
 	balance := 0
-	UTXOs, err := bc.FindUTXO([]byte(address))
+	UTXOs, err := utxoSet.FindUTXO([]byte(address))
 	if err != nil {
 		log.Panic(err)
 	}
-
-	fmt.Println("len utxo", len(UTXOs))
 
 	for _, out := range UTXOs {
 		balance += out.Value
@@ -72,7 +71,13 @@ func (cli *CLI) send(from, to string, amount int) {
 
 	txs := []*hoji.Transaction{tx, coinbaseTx}
 
-	if err := bc.MineBlock(txs); err != nil {
+	b, err := bc.MineBlock(txs)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	utxoSet := hoji.UTXOSet{Bc: bc}
+	if err := utxoSet.Update(b); err != nil {
 		log.Panic(err)
 	}
 

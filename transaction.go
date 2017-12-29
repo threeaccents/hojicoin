@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
+	"errors"
+	"log"
 	"math/big"
 )
 
@@ -61,54 +63,36 @@ func (bc *Blockchain) NewTx(from, to []byte, amount int) (*Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	wallet := wallets.GetWallet(string(from))
-	pubKeyHash, err := hashPubKey(wallet.PublicKey)
-	if err != nil {
-		return nil, err
-	}
 
-	txs, err := bc.FindUnspentTxs(from)
+	utxoSet := UTXOSet{Bc: bc}
+
+	spendableOutputs, err := utxoSet.FindSpendableOutputs(from)
 	if err != nil {
 		return nil, err
 	}
 
 	accumulated := 0
-Work:
-	for _, tx := range txs {
-		for i, output := range tx.Outputs {
-			if output.IsLockedWithKey(pubKeyHash) && accumulated < amount {
-				accumulated += output.Value
-
-				in := &TxInput{
-					TxID:     tx.ID,
-					outIndex: i,
-					PubKey:   wallet.PublicKey,
-				}
-
-				inputs = append(inputs, in)
-
-				if accumulated > amount {
-					break Work
-				}
-			}
+	for _, so := range spendableOutputs {
+		accumulated += so.Value
+		in := &TxInput{
+			TxID:     so.TxID,
+			outIndex: so.index,
+			PubKey:   wallet.PublicKey,
 		}
+		inputs = append(inputs, in)
 	}
 
-	if accumulated < amount {
-		return nil, ErrInsuficientFunds
-	}
 	outputs = append(outputs, NewTxOutput(amount, to))
 	if accumulated > amount {
 		change := accumulated - amount
-		outputs = append(outputs, NewTxOutput(change, from))
+		outputs = append(outputs, NewTxOutput(change, from)) // a change
 	}
 
 	tx := &Transaction{
 		Outputs: outputs,
 		Inputs:  inputs,
 	}
-
 	txID, err := tx.hashTransaction()
 	if err != nil {
 		return nil, err
@@ -118,6 +102,7 @@ Work:
 	if err := bc.SignTx(tx, wallet.PrivateKey); err != nil {
 		return nil, err
 	}
+
 	return tx, nil
 }
 
@@ -127,25 +112,39 @@ func (t *Transaction) Sign(privateKey *ecdsa.PrivateKey, prevTxs map[string]*Tra
 		return nil
 	}
 
+	for _, input := range t.Inputs {
+		if prevTxs[hex.EncodeToString(input.TxID)].ID == nil {
+			return errors.New("ERROR: Previous transaction is not correct")
+		}
+	}
+
 	trimmedTx := t.Trim()
 
 	for inputIndex, input := range trimmedTx.Inputs {
 		prevTx := prevTxs[hex.EncodeToString(input.TxID)]
+		trimmedTx.Inputs[inputIndex].Signature = nil
 		trimmedTx.Inputs[inputIndex].PubKey = prevTx.Outputs[input.outIndex].PubKeyHash
-		id, err := trimmedTx.hashTransaction()
+		x := new(big.Int)
+		y := new(big.Int)
+		keyLen := len(input.PubKey)
+		x.SetBytes(trimmedTx.Inputs[inputIndex].PubKey[:(keyLen / 2)])
+		y.SetBytes(trimmedTx.Inputs[inputIndex].PubKey[(keyLen / 2):])
+
+		txID, err := trimmedTx.hashTransaction()
 		if err != nil {
 			return err
 		}
-		trimmedTx.ID = id
+		trimmedTx.ID = txID
 		trimmedTx.Inputs[inputIndex].PubKey = nil
 
 		r, s, err := ecdsa.Sign(rand.Reader, privateKey, trimmedTx.ID)
 		if err != nil {
-			return err
+			log.Panic(err)
 		}
-
 		signature := append(r.Bytes(), s.Bytes()...)
+
 		t.Inputs[inputIndex].Signature = signature
+
 	}
 
 	return nil
@@ -157,6 +156,12 @@ func (t *Transaction) Verify(prevTxs map[string]*Transaction) (bool, error) {
 		return true, nil
 	}
 
+	for _, input := range t.Inputs {
+		if prevTxs[hex.EncodeToString(input.TxID)].ID == nil {
+			return false, errors.New("ERROR: Previous transaction is not correct")
+		}
+	}
+
 	trimmedTx := t.Trim()
 	curve := elliptic.P256()
 
@@ -164,31 +169,31 @@ func (t *Transaction) Verify(prevTxs map[string]*Transaction) (bool, error) {
 		prevTx := prevTxs[hex.EncodeToString(input.TxID)]
 		trimmedTx.Inputs[inputIndex].Signature = nil
 		trimmedTx.Inputs[inputIndex].PubKey = prevTx.Outputs[input.outIndex].PubKeyHash
-		id, err := trimmedTx.hashTransaction()
+		txID, err := trimmedTx.hashTransaction()
 		if err != nil {
 			return false, err
 		}
-		trimmedTx.ID = id
+		trimmedTx.ID = txID
 		trimmedTx.Inputs[inputIndex].PubKey = nil
 
-		r := big.Int{}
-		s := big.Int{}
-		signatureLen := len(input.Signature)
-		r.SetBytes(input.Signature[:(signatureLen / 2)])
-		s.SetBytes(input.Signature[(signatureLen / 2):])
+		r := new(big.Int)
+		s := new(big.Int)
+		sigLen := len(input.Signature)
+		r.SetBytes(input.Signature[:(sigLen / 2)])
+		s.SetBytes(input.Signature[(sigLen / 2):])
 
-		x := big.Int{}
-		y := big.Int{}
+		x := new(big.Int)
+		y := new(big.Int)
 		keyLen := len(input.PubKey)
 		x.SetBytes(input.PubKey[:(keyLen / 2)])
 		y.SetBytes(input.PubKey[(keyLen / 2):])
 
 		rawPubKey := ecdsa.PublicKey{
 			Curve: curve,
-			X:     &x,
-			Y:     &y,
+			X:     x,
+			Y:     y,
 		}
-		if ecdsa.Verify(&rawPubKey, trimmedTx.ID, &r, &s) == false {
+		if ecdsa.Verify(&rawPubKey, trimmedTx.ID, r, s) == false {
 			return false, nil
 		}
 	}

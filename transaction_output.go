@@ -2,6 +2,7 @@ package hoji
 
 import (
 	"bytes"
+	"encoding/gob"
 
 	"gitlab.com/rodzzlessa24/hoji/base58"
 )
@@ -31,4 +32,30 @@ func (o *TxOutput) Lock(address []byte) {
 //IsLockedWithKey is
 func (o *TxOutput) IsLockedWithKey(pubKeyHash []byte) bool {
 	return bytes.Compare(o.PubKeyHash, pubKeyHash) == 0
+}
+
+//TxOutputs is
+type TxOutputs struct {
+	Outputs []*TxOutput
+}
+
+//Bytes transforms outputs into a byte array
+func (o *TxOutputs) Bytes() ([]byte, error) {
+	var buff bytes.Buffer
+
+	if err := gob.NewEncoder(&buff).Encode(o); err != nil {
+		return nil, err
+	}
+
+	return buff.Bytes(), nil
+}
+
+// BytesToOutputs deserializes TxOutputs
+func BytesToOutputs(data []byte) (*TxOutputs, error) {
+	var outputs *TxOutputs
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&outputs); err != nil {
+		return nil, err
+	}
+
+	return outputs, nil
 }

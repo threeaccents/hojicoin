@@ -1,22 +1,45 @@
 package main
 
 import (
-	"encoding/hex"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"fmt"
-
-	"gitlab.com/rodzzlessa24/hoji"
+	"log"
+	"math/big"
 )
 
-// 17f7LXxyYva2jN54N4gNhJZsiCc91VCcrh
-// 4905d9d7093452122f58c8f0499cf3fd07bfba8f
-
-// 1M6pcEFGLF2oq1nHpo519Jau15PsUJu7HP
-// dc7c560c8a96a7e96c87ce0c5bfa7daa08aaa8cd
-
 func main() {
-	address := []byte("1M6pcEFGLF2oq1nHpo519Jau15PsUJu7HP")
+	curve := elliptic.P256()
+	private, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		log.Panic(err)
+	}
+	pubKey := append(private.PublicKey.X.Bytes(), private.PublicKey.Y.Bytes()...)
 
-	pubKey := hoji.ExtractPubKeyHash(address)
+	r, s, err := ecdsa.Sign(rand.Reader, private, []byte("testing this bitch"))
+	if err != nil {
+		log.Panic(err)
+	}
+	signature := append(r.Bytes(), s.Bytes()...)
 
-	fmt.Println("key: ", hex.EncodeToString(pubKey))
+	r = new(big.Int)
+	s = new(big.Int)
+	sigLen := len(signature)
+	r.SetBytes(signature[:(sigLen / 2)])
+	s.SetBytes(signature[(sigLen / 2):])
+
+	x := big.Int{}
+	y := big.Int{}
+	keyLen := len(pubKey)
+	x.SetBytes(pubKey[:(keyLen / 2)])
+	y.SetBytes(pubKey[(keyLen / 2):])
+
+	rawPubKey := ecdsa.PublicKey{
+		Curve: curve,
+		X:     &x,
+		Y:     &y,
+	}
+
+	fmt.Println(ecdsa.Verify(&rawPubKey, []byte("testing this bitch"), r, s))
 }
