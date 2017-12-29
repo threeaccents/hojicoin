@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
-	"fmt"
 	"math/big"
 )
 
@@ -105,7 +104,6 @@ Work:
 		outputs = append(outputs, NewTxOutput(change, from))
 	}
 
-	fmt.Printf("we have %d outputs \n", len(outputs))
 	tx := &Transaction{
 		Outputs: outputs,
 		Inputs:  inputs,
