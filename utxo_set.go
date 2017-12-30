@@ -64,36 +64,9 @@ func CreateUTXOSet(bc *Blockchain) error {
 	})
 }
 
-// FindUTXO finds UTXO for an address
-func (u UTXOSet) FindUTXO(address []byte) ([]*TxOutput, error) {
-	var UTXOs []*TxOutput
-
-	pubKeyHash := ExtractPubKeyHash(address)
-
-	if err := u.Bc.DB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(utxoBucket))
-		c := b.Cursor()
-
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			outs, err := BytesToOutputs(v)
-			if err != nil {
-				return err
-			}
-
-			for _, out := range outs.Outputs {
-				fmt.Println("hash", hex.EncodeToString(out.PubKeyHash))
-				if out.IsLockedWithKey(pubKeyHash) {
-					UTXOs = append(UTXOs, out)
-				}
-			}
-		}
-
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
-	return UTXOs, nil
+//Reindex is
+func (u *UTXOSet) Reindex() error {
+	return CreateUTXOSet(u.Bc)
 }
 
 //FindSpendableOutputs is
@@ -130,6 +103,58 @@ func (u *UTXOSet) FindSpendableOutputs(address []byte) ([]*SpendableOutput, erro
 	}
 
 	return spendableOutput, nil
+}
+
+// FindUTXO finds UTXO for an address
+func (u UTXOSet) FindUTXO(address []byte) ([]*TxOutput, error) {
+	var UTXOs []*TxOutput
+
+	pubKeyHash := ExtractPubKeyHash(address)
+
+	if err := u.Bc.DB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(utxoBucket))
+		c := b.Cursor()
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			outs, err := BytesToOutputs(v)
+			if err != nil {
+				return err
+			}
+
+			for _, out := range outs.Outputs {
+				fmt.Println("hash", hex.EncodeToString(out.PubKeyHash))
+				if out.IsLockedWithKey(pubKeyHash) {
+					UTXOs = append(UTXOs, out)
+				}
+			}
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return UTXOs, nil
+}
+
+// CountTransactions returns the number of transactions in the UTXO set
+func (u UTXOSet) CountTransactions() (int, error) {
+	counter := 0
+
+	if err := u.Bc.DB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(utxoBucket))
+		c := b.Cursor()
+
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			counter++
+		}
+
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	return counter, nil
 }
 
 //Update is

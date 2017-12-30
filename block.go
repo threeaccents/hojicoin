@@ -2,7 +2,6 @@ package hoji
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/gob"
 	"time"
 )
@@ -45,14 +44,19 @@ func (b *Block) SetHash() {
 }
 
 //HashTransactions will hash the blocks transaction struct slice and return it. It does this by concatinating all the transaction ids and then sha256 hasing them.
-func (b *Block) HashTransactions() []byte {
-	var txIds [][]byte
-	for _, tx := range b.Transactions {
-		txIds = append(txIds, tx.ID)
-	}
+func (b *Block) HashTransactions() ([]byte, error) {
+	var transactions [][]byte
 
-	hash := sha256.Sum256(bytes.Join(txIds, []byte{}))
-	return hash[:]
+	for _, tx := range b.Transactions {
+		b, err := tx.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		transactions = append(transactions, b)
+	}
+	mTree := NewMerkleTree(transactions)
+
+	return mTree.RootNode.Data, nil
 }
 
 //Bytes transforms a Block struct to a byte array

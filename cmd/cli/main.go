@@ -49,6 +49,20 @@ func (cli *CLI) getBalance(address string) {
 	fmt.Printf("Balance of '%s': %d\n", address, balance)
 }
 
+func (cli *CLI) reindexUTXO() {
+	bc, _ := hoji.NewBlockchain()
+	UTXOSet := hoji.UTXOSet{
+		Bc: bc,
+	}
+	UTXOSet.Reindex()
+
+	count, err := UTXOSet.CountTransactions()
+	if err != nil {
+		log.Panic(err)
+	}
+	fmt.Printf("Done! There are %d transactions in the UTXO set.\n", count)
+}
+
 func (cli *CLI) send(from, to string, amount int) {
 	if !hoji.ValidateAddress(from) {
 		log.Panic("ERROR: from address is not valid")
@@ -88,6 +102,7 @@ func (cli *CLI) printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  getbalance -address ADDRESS - Get balance of ADDRESS")
 	fmt.Println("  createblockchain -address ADDRESS - Create a blockchain and send genesis block reward to ADDRESS")
+	fmt.Println("  reindexutxo - Rebuilds the UTXO set")
 	fmt.Println("  createwallet - Generates a new key-pair and saves it into the wallet file")
 	fmt.Println("  printchain - Print all the blocks of the blockchain")
 	fmt.Println("  send -from FROM -to TO -amount AMOUNT - Send AMOUNT of coins from FROM address to TO")
@@ -158,6 +173,7 @@ func (cli *CLI) Run() {
 	listAddressesCmd := flag.NewFlagSet("listaddresses", flag.ExitOnError)
 	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
+	reindexUTXOCmd := flag.NewFlagSet("reindexutxo", flag.ExitOnError)
 
 	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
 	createBlockchainAddress := createBlockchainCmd.String("address", "", "The address to send genesis block reward to")
@@ -173,6 +189,11 @@ func (cli *CLI) Run() {
 		}
 	case "createblockchain":
 		err := createBlockchainCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "reindexutxo":
+		err := reindexUTXOCmd.Parse(os.Args[2:])
 		if err != nil {
 			log.Panic(err)
 		}
@@ -207,6 +228,10 @@ func (cli *CLI) Run() {
 			os.Exit(1)
 		}
 		cli.getBalance(*getBalanceAddress)
+	}
+
+	if reindexUTXOCmd.Parsed() {
+		cli.reindexUTXO()
 	}
 
 	if createBlockchainCmd.Parsed() {

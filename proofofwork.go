@@ -44,7 +44,7 @@ func (p *ProofOfWork) Exec() ([]byte, int) {
 			log.Panic("proof of work nonce overflow")
 		}
 
-		preppedData := p.prepData(nonce)
+		preppedData, _ := p.prepData(nonce)
 		hash := sha256.Sum256(preppedData)
 		hashInt.SetBytes(hash[:])
 		fmt.Printf("\rtesting hash: %x : hash number: %s", hash, hashInt.String())
@@ -61,7 +61,7 @@ func (p *ProofOfWork) Exec() ([]byte, int) {
 func (p *ProofOfWork) Validate() bool {
 	var hashInt big.Int
 
-	data := p.prepData(p.Block.Nonce)
+	data, _ := p.prepData(p.Block.Nonce)
 	hash := sha256.Sum256(data)
 	hashInt.SetBytes(hash[:])
 
@@ -69,15 +69,19 @@ func (p *ProofOfWork) Validate() bool {
 }
 
 //prepData will convert all of the pow data into bytes.
-func (p *ProofOfWork) prepData(nonce int) []byte {
+func (p *ProofOfWork) prepData(nonce int) ([]byte, error) {
+	hashedTransaction, err := p.Block.HashTransactions()
+	if err != nil {
+		return nil, err
+	}
 	return bytes.Join(
 		[][]byte{
 			p.Block.PrevBlockHash,
 			IntToByte(p.Block.Timestamp),
-			p.Block.HashTransactions(),
+			hashedTransaction,
 			IntToByte(int64(targetBits)),
 			IntToByte(int64(nonce)),
 		},
 		[]byte{},
-	)
+	), nil
 }

@@ -240,6 +240,15 @@ func (t *Transaction) hashTransaction() ([]byte, error) {
 	return hash[:], nil
 }
 
+//Bytes is
+func (t *Transaction) Bytes() ([]byte, error) {
+	var encoded bytes.Buffer
+	if err := gob.NewEncoder(&encoded).Encode(t); err != nil {
+		return nil, err
+	}
+	return encoded.Bytes(), nil
+}
+
 // IsCoinbase checks whether the transaction is a coinbase tx
 func (t *Transaction) IsCoinbase() bool {
 	return len(t.Inputs) == 1 && len(t.Inputs[0].TxID) == 0 && t.Inputs[0].outIndex == -1
